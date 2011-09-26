@@ -22,6 +22,33 @@ substutition_probabilities = {'T': 'C' * 23 + 'A' * 6  + 'G' * 6,
                               'G': 'A' * 7  + 'T' * 3  + 'C' * 4,
                               'A': 'T' * 7  + 'C' * 3  + 'G' * 22}
 
+
+# the probabilty of having an insertion or deletion in a homopolymer region
+# is correlated with the length of the sequences. following parameters
+# of the empirical distributions in homopolymer errors are derived from
+# a the paper titled "Characteristics of 454 pyrosequencing data —enabling
+# realistic simulation with flowsim" by Suzanne Balzer et al. 
+# 
+# Paper can be obtained via this address:
+#
+# http://bioinformatics.oxfordjournals.org/content/26/18/i420.full
+#
+# Mean and standard deviation of normal distribution around homopolymer
+# lengths of 6, 7, 8 and 9 are derived from the linear regression of
+# this rule: {mean: n, std: 0.03494 + n * 0.06856} where n denotes the
+# length of the homopolymer. 
+homopolymer_error_probabilities = {0: {'mu': 0.1230, 'sigma': 0.0737},
+                                   1: {'mu': 1.0193, 'sigma': 0.1230},
+                                   2: {'mu': 2.0006, 'sigma': 0.1585},
+                                   3: {'mu': 2.9934, 'sigma': 0.2188},
+                                   4: {'mu': 3.9962, 'sigma': 0.3168},
+                                   5: {'mu': 4.9550, 'sigma': 0.3863},
+                                   6: {'mu': 6.0000, 'sigma': 0.4462},
+                                   7: {'mu': 7.0000, 'sigma': 0.5148},
+                                   8: {'mu': 8.0000, 'sigma': 0.5834},
+                                   9: {'mu': 9.0000, 'sigma': 0.6519}}
+
+
 # necessity for normalization: even though expected_error_rate gives us the expected
 # error rate, it doesn't reflect the fact that some bases more probable
 # to have a substitution error than others. for instance, among all errors, 32% of errors 
@@ -44,9 +71,6 @@ def pp(n):
     ret.reverse()
 
     return ''.join(ret[1:]) if ret[0] == ',' else ''.join(ret)
-
-def has_homopolymer_error(homopoylmer):
-    pass
 
 def has_in_del_sub_error(location, base):
     # this function basically doubles the base error probability
@@ -71,13 +95,14 @@ def update_nucleotide(nucleotide):
     # %90 percent of errors are substitutions.
 
     r = random.randint(1, 100)
+
     if r <= 5:
         # this is a deletion
         return ''
     if r <= 10:
         # this is an insertion, we don't know what to insert,
-        # ergo we will likelihood of the insertion of any base
-        # is equal
+        # ergo we will assume the probability of any base to
+        # be inserted here is equal
         return nucleotide + ['A', 'T', 'C', 'G'][random.randint(0, 3)]
     else:
         # here it is a substitution.. probability of change is different
@@ -85,6 +110,19 @@ def update_nucleotide(nucleotide):
         # coded in substutition_probabilities dict.
         return random.sample(substutition_probabilities[nucleotide], 1)[0]
 
+def update_homopolymer_region(homopolymer):
+    # if, for some reason, 'homopolymer' is actually not a homopolymer,
+    # return it ('not my problem' mode is [ON]).
+    if not len(set(homopolymer)) == 1:
+        return homopolymer
+
+    # FIXME: I have to come up with an explanation for this one here:
+    if random.randint(1, 5) != 1:
+        return homopolymer
+
+    e = homopolymer_error_probabilities[len(homopolymer)]
+
+    return homopolymer[0] * int(round(random.gauss(e['mu'], e['sigma'])))
 
 class Member:
     def __init__(self, sequence):
@@ -93,7 +131,7 @@ class Member:
         self.hp_regions = []
         self.hp_free_base_locs = []
         self.get_hp_free_base_locs()
-       
+      
         self.id = None
         self.ratio = 0
         self.abundance = 0
@@ -116,7 +154,7 @@ class Member:
                 if j + index >= len(sequence):
                     break
             
-            if j >= 3:
+            if j > 3:
                 self.hp_regions.append((index, index + j - 1))
             index += j - 1
 
@@ -161,6 +199,7 @@ def main(config):
    
     output = open(config.output_file, 'w')
     sys.stderr.write('Introducing random errors... ')
+
     for i in range(0, len(config.member_distribution)):
         if i % 1000:
             sys.stderr.write('\rIntroducing random erros -- %.2d%%' % (int(round(i * 100.0 / config.total_sequences))))
@@ -168,44 +207,78 @@ def main(config):
 
         member = config.member_distribution[i]
         
-        sequence_with_in_del_sub_errors = ''
+        sequence_with_errors = ''
         number_of_errors = 0
-        for j in range(0, len(member.sequence)):
-            nucleotide = member.sequence[j]
-            # testing every nucleotide that is not in a homopolymer region in the
-            # template sequence for insertions, deletions and substitutions:
-            if has_in_del_sub_error(j, nucleotide):
-                # if we are here, it means we hit the prob of 0.0025.
-                # it is time to find out what type error we have,
-                # with what kind of outcome.
-                nucleotide = update_nucleotide(nucleotide)
-                
-                number_of_errors += 1
-                 
-            sequence_with_in_del_sub_errors += nucleotide
+        number_of_hp_errors = 0
         
+        j = 0
+        while True:
+            if j == len(member.sequence):
+                break
+            
+            if j in member.hp_free_base_locs:
+                nucleotide = member.sequence[j]
+                # testing every nucleotide that is not in a homopolymer region in the
+                # template sequence for insertions, deletions and substitutions:
+                if has_in_del_sub_error(j, nucleotide):
+                    # if we are here, it means we hit the prob of 0.0025.
+                    # it is time to find out what type error we have,
+                    # with what kind of outcome.
+                    nucleotide = update_nucleotide(nucleotide)
+                    
+                    number_of_errors += 1
+                
+                sequence_with_errors += nucleotide
+                
+                j += 1
+                     
+            else:
+                # potential FIXME: if we are in this else clause, we are about to process a homopolymer region.
+                # at this point we ignore the fact that there may be substitution errors in homopolymer
+                # regions, but I can't see why it would be the case. current assumption makes it easier to
+                # implement this section due to the fact that we can rely on the template to find out where
+                # homopolymer regions are (since they are not being changed by regular sub/in/del errors).
+                # but this is something to think about. this approach might have to change.
+                hp_tpl = [region for region in member.hp_regions if region[0] <= j and region[1] > j][0]
+                
+                original_hp_region = member.sequence[hp_tpl[0]:hp_tpl[1]]
+                updated_hp_region = update_homopolymer_region(original_hp_region)
+                
+                sequence_with_errors += updated_hp_region
+                
+                if updated_hp_region != original_hp_region:
+                    number_of_errors += 1
+                    number_of_hp_errors += 1
+
+                j += len(original_hp_region)
+        
+
         member.error_distribution[number_of_errors] = member.error_distribution[number_of_errors] + 1 \
                                                          if member.error_distribution.has_key(number_of_errors) else 1
-
-
-        #
-        # FIXME: introduction of homopolymer region associated issues will be here
-        #
-
-        output.write('>%s | type: %s | errors: %s\n' % 
+        
+        output.write('>%s | type: %s | all_errors: %d | hp_errors: %d\n' % 
                               ('_'.join([config.community, i.__str__()]),
                                member.id,
-                               number_of_errors))
+                               number_of_errors,
+                               number_of_hp_errors))
         
-        output.write(sequence_with_in_del_sub_errors + '\n')
+        output.write(sequence_with_errors + '\n')
     
     output.close()
     
-    sys.stderr.write('\n\nError distributions:\n')
+    sys.stderr.write('\n\nBasic stats:\n')
     for member in config.members:
-        sys.stderr.write('\n\t* Member "%s":\n' % (member.id))
+        sys.stderr.write('\n\tMember "%s"\n\t%s\n\n' % (member.id, '-'*50))
+        sys.stderr.write('\t\t:: Abundance         : %s\n' % (pp(member.abundance)))
+        total_bases = member.abundance * len(member.sequence)
+        sys.stderr.write('\t\t:: Total bases       : %s\n' % (pp(total_bases)))
+        total_errors = sum([x * member.error_distribution[x] for x in member.error_distribution])
+        sys.stderr.write('\t\t:: Total errors      : %s\n' % (pp(total_errors)))
+        error_base_ratio = total_errors / float(total_bases)
+        sys.stderr.write('\t\t:: Error-base ratio  : 1 in %d\n' % (1 / error_base_ratio))
+        sys.stderr.write('\t\t:: Error distribution:\n')
         for key in sorted(member.error_distribution.keys()):
-            sys.stderr.write('\t\t- %d Error%s: %s (%%%.4f)\n' % (key, 's' if key != 1 else ' ',
+            sys.stderr.write('\t\t   - %d Error%s: %s (%%%.4f)\n' % (key, 's' if key != 1 else ' ',
                                                                   pp(member.error_distribution[key]),
                                                                   member.error_distribution[key] * 100.0 / sum(member.error_distribution.values())))
 
@@ -237,5 +310,6 @@ if __name__ == '__main__':
             member.ratio = int(user_config.get(section, 'ratio'))
             
             config.members.append(member)
+            config.members.sort(reverse=True)
 
     sys.exit(main(config))
