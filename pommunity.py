@@ -98,6 +98,8 @@ class Member:
         self.ratio = 0
         self.abundance = 0
 
+        self.error_distribution = {}
+
     def get_hp_free_base_locs(self):
         sequence = self.sequence + ' '
         regionIsHP = lambda x: len(set(x)) == 1
@@ -173,13 +175,18 @@ def main(config):
             # testing every nucleotide that is not in a homopolymer region in the
             # template sequence for insertions, deletions and substitutions:
             if has_in_del_sub_error(j, nucleotide):
-                number_of_errors += 1
                 # if we are here, it means we hit the prob of 0.0025.
                 # it is time to find out what type error we have,
                 # with what kind of outcome.
                 nucleotide = update_nucleotide(nucleotide)
-            
+                
+                number_of_errors += 1
+                 
             sequence_with_in_del_sub_errors += nucleotide
+        
+        member.error_distribution[number_of_errors] = member.error_distribution[number_of_errors] + 1 \
+                                                         if member.error_distribution.has_key(number_of_errors) else 1
+
 
         #
         # FIXME: introduction of homopolymer region associated issues will be here
@@ -194,7 +201,16 @@ def main(config):
     
     output.close()
     
+    sys.stderr.write('\n\nError distributions:\n')
+    for member in config.members:
+        sys.stderr.write('\n\t* Member "%s":\n' % (member.id))
+        for key in sorted(member.error_distribution.keys()):
+            sys.stderr.write('\t\t- %d Error%s: %s (%%%.4f)\n' % (key, 's' if key != 1 else ' ',
+                                                                  pp(member.error_distribution[key]),
+                                                                  member.error_distribution[key] * 100.0 / sum(member.error_distribution.values())))
+
     sys.stderr.write('\n\nFASTA File for community %s is ready: "%s"\n\n' % (config.community, config.output_file))
+
 
 if __name__ == '__main__':
     import argparse
