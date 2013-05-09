@@ -1,1 +1,3 @@
-(it is not mature enough to deserve a README yet).
+A tool that mimics Roche/454 errors and generates pseudo-communities from given sequence templates.
+
+See sample config.ini.
