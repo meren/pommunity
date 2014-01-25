@@ -256,7 +256,7 @@ def main(config):
         member.error_distribution[number_of_errors] = member.error_distribution[number_of_errors] + 1 \
                                                          if member.error_distribution.has_key(number_of_errors) else 1
         
-        output.write('>%s | type: %s | all_errors: %d | hp_errors: %d\n' % 
+        output.write('>%s | type: %s | all-errors: %d | hp-errors: %d\n' % 
                               ('_'.join([config.community, i.__str__()]),
                                member.id,
                                number_of_errors,
